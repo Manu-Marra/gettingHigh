@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async'; // Serve per gli Stream (tempo e durata)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Serve per leggere il JSON dagli assets
 import 'package:just_audio/just_audio.dart'; // Il player audio
@@ -15,28 +16,36 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'My Music',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
         appBarTheme: const AppBarTheme(backgroundColor: Colors.black),
+        sliderTheme: const SliderThemeData(
+          activeTrackColor: Colors.green,
+          thumbColor: Colors.green,
+          inactiveTrackColor: Colors.grey,
+        ),
       ),
       home: const PlaylistScreen(),
     );
   }
 }
 
-// --- 1. I MODELLI DEI DATI ---
-// Queste classi servono a trasformare il JSON in oggetti Dart utilizzabili
+// --- 1. I MODELLI DEI DATI (Invariati) ---
 class Track {
   final String name;
   final String artist;
   final String album;
   final String searchQuery;
+  // Aggiungiamo un campo opzionale per l'immagine che recupereremo da YouTube
+  String? runtimeThumbnail; 
 
   Track({
     required this.name,
     required this.artist,
     required this.album,
     required this.searchQuery,
+    this.runtimeThumbnail,
   });
 
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -67,79 +76,126 @@ class Playlist {
   }
 }
 
-// --- 2. IL MOTORE AUDIO ---
-// Questa classe gestisce la logica "sporca": cerca su YT e riproduce
-class AudioPlayerService {
-  final _player = AudioPlayer();
-  final _yt = YoutubeExplode();
+// --- 2. IL MOTORE AUDIO AVANZATO (Modificato per JSON) ---
+class AudioManager extends ChangeNotifier {
+  static final AudioManager _instance = AudioManager._internal();
+  factory AudioManager() => _instance;
+  AudioManager._internal();
 
-Future<void> playTrack(String searchQuery) async {
+  final YoutubeExplode _yt = YoutubeExplode();
+  final AudioPlayer _player = AudioPlayer();
+
+  // CODA E STATO
+  List<Track> _queue = [];
+  int _currentIndex = -1;
+  bool _isLoading = false;
+
+  // GETTERS
+  bool get isPlaying => _player.playing;
+  bool get isLoading => _isLoading;
+  Track? get currentTrack => (_currentIndex >= 0 && _currentIndex < _queue.length) ? _queue[_currentIndex] : null;
+  Stream<Duration> get positionStream => _player.positionStream;
+  Stream<Duration?> get durationStream => _player.durationStream;
+  Stream<PlayerState> get playerStateStream => _player.playerStateStream;
+
+  // Imposta la playlist e inizia a suonare dalla traccia selezionata
+  Future<void> setQueue(List<Track> tracks, int initialIndex) async {
+    _queue = List.from(tracks);
+    _currentIndex = initialIndex;
+    await _playCurrent();
+  }
+
+  Future<void> _playCurrent() async {
+    if (_currentIndex < 0 || _currentIndex >= _queue.length) return;
+    
+    _isLoading = true;
+    notifyListeners();
+
     try {
-      print("CERCO SU YOUTUBE: $searchQuery");
-      
-      var searchList = await _yt.search.search(searchQuery);
+      final track = _queue[_currentIndex];
+      print("CERCO SU YOUTUBE: ${track.searchQuery}");
+
+      var searchList = await _yt.search.search(track.searchQuery);
       if (searchList.isEmpty) return;
       var video = searchList.first;
 
+      // Salviamo la thumbnail per mostrarla nel player
+      track.runtimeThumbnail = video.thumbnails.lowResUrl;
+
       var manifest = await _yt.videos.streamsClient.getManifest(video.id);
-      
       dynamic streamInfo;
-      
-      // LOGICA COMPATIBILE VERSIONE 3.0.5
-      // Non usiamo più le scorciatoie .withLowestBitrate() che non esistono più.
-      
+
+      // LOGICA MP4 (Quella robusta che abbiamo fatto prima)
       try {
-        // 1. Filtra: prendi solo quelli che sono MP4
         var mp4Streams = manifest.muxed.where(
           (s) => s.container.name.toString().toLowerCase().contains('mp4')
         ).toList();
         
         if (mp4Streams.isNotEmpty) {
-           // 2. Ordina: dal più piccolo al più grande (per risparmiare dati e caricare veloce)
            mp4Streams.sort((a, b) => a.bitrate.compareTo(b.bitrate));
-           
-           // 3. Prendi il primo (il più leggero)
            streamInfo = mp4Streams.first;
-           print("TROVATO MP4 (Versione 3.0)");
         } else {
            throw Exception("Nessun MP4");
         }
-
       } catch (e) {
-        // Fallback: Se non trova MP4, prendi il primo stream disponibile nella lista muxed
-        print("Fallback: Prendo il primo stream disponibile");
-        // .first funziona sempre su tutte le liste
         streamInfo = manifest.muxed.first; 
       }
 
       var url = streamInfo.url.toString();
-      print("URL: $url");
 
-      // HEADER MASCHERATI (User-Agent Mobile)
       await _player.setAudioSource(AudioSource.uri(
         Uri.parse(url),
         headers: {
           'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
         },
       ));
-      
+
       _player.play();
-      
     } catch (e) {
-      print("ERRORE CRITICO: $e");
+      print("ERRORE: $e");
+      next(); // Se fallisce, prova la prossima
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
-  void stop() => _player.stop();
-  
-  // Chiude tutto quando l'app si chiude per liberare memoria
-  void dispose() {
-    _player.dispose();
-    _yt.close();
+  // CONTROLLI
+  void togglePlayPause() {
+    if (_player.playing) _player.pause();
+    else _player.play();
+    notifyListeners();
+  }
+
+  void next() {
+    if (_currentIndex < _queue.length - 1) {
+      _currentIndex++;
+      _playCurrent();
+    }
+  }
+
+  void previous() {
+    if (_player.position.inSeconds > 3) {
+      _player.seek(Duration.zero);
+    } else if (_currentIndex > 0) {
+      _currentIndex--;
+      _playCurrent();
+    }
+  }
+
+  void seek(Duration position) {
+    _player.seek(position);
+  }
+
+  void stop() {
+    _player.stop();
+    _queue.clear();
+    _currentIndex = -1;
+    notifyListeners();
   }
 }
 
-// --- 3. L'INTERFACCIA UTENTE (UI) ---
+// --- 3. UI (Modificata per usare AudioManager) ---
 class PlaylistScreen extends StatefulWidget {
   const PlaylistScreen({super.key});
 
@@ -149,19 +205,25 @@ class PlaylistScreen extends StatefulWidget {
 
 class _PlaylistScreenState extends State<PlaylistScreen> {
   List<Playlist> playlists = [];
-  final AudioPlayerService _audioService = AudioPlayerService();
+  final AudioManager _audioManager = AudioManager(); // Singleton
   
-  bool isLoading = true;       // Stiamo caricando il JSON?
-  Playlist? selectedPlaylist;  // Quale playlist sta guardando l'utente?
-  Track? currentTrack;         // Quale canzone sta suonando?
+  bool isLoading = true;
+  Playlist? selectedPlaylist;
 
   @override
   void initState() {
     super.initState();
     loadPlaylists();
+    
+    // Ascolta la fine della canzone per andare avanti
+    _audioManager.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        _audioManager.next();
+      }
+      if (mounted) setState(() {});
+    });
   }
 
-  // Carica il file JSON dalla cartella assets
   Future<void> loadPlaylists() async {
     try {
       final String response = await rootBundle.loadString('assets/music_data.json');
@@ -172,23 +234,18 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       });
     } catch (e) {
       print("Errore lettura JSON: $e");
+      // Dati di fallback se il JSON non esiste
+      setState(() => isLoading = false);
     }
-  }
-
-  @override
-  void dispose() {
-    _audioService.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Schermata di caricamento
     if (isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // VISTA 1: LISTA DELLE PLAYLIST
+    // LISTA DELLE PLAYLIST
     if (selectedPlaylist == null) {
       return Scaffold(
         appBar: AppBar(title: const Text("Le mie Playlist")),
@@ -200,24 +257,21 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               leading: const Icon(Icons.folder, color: Colors.green, size: 40),
               title: Text(pl.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
               subtitle: Text("${pl.tracks.length} brani", style: const TextStyle(color: Colors.grey)),
-              onTap: () {
-                // Quando clicco, imposto la playlist selezionata
-                setState(() {
-                  selectedPlaylist = pl;
-                });
-              },
+              onTap: () => setState(() => selectedPlaylist = pl),
             );
           },
         ),
+        // Mostriamo il MiniPlayer anche qui
+        bottomNavigationBar: const MiniPlayer(),
       );
     }
 
-    // VISTA 2: DENTRO UNA PLAYLIST (LISTA BRANI)
+    // DENTRO UNA PLAYLIST
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => setState(() => selectedPlaylist = null), // Torna indietro
+          onPressed: () => setState(() => selectedPlaylist = null),
         ),
         title: Text(selectedPlaylist!.name),
       ),
@@ -228,59 +282,120 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               itemCount: selectedPlaylist!.tracks.length,
               itemBuilder: (context, index) {
                 final track = selectedPlaylist!.tracks[index];
-                final isPlaying = currentTrack == track;
+                // Controllo se è la canzone corrente per colorarla di verde
+                final isCurrent = _audioManager.currentTrack == track;
                 
                 return ListTile(
                   leading: Icon(
-                    isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill,
-                    color: isPlaying ? Colors.green : Colors.white,
-                    size: 30,
+                    isCurrent && _audioManager.isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: isCurrent ? Colors.green : Colors.white,
                   ),
                   title: Text(track.name, 
-                    style: TextStyle(
-                      color: isPlaying ? Colors.green : Colors.white,
-                      fontWeight: FontWeight.bold
-                    )
+                    style: TextStyle(color: isCurrent ? Colors.green : Colors.white, fontWeight: FontWeight.bold)
                   ),
                   subtitle: Text(track.artist, style: const TextStyle(color: Colors.grey)),
-                  onTap: () async {
-                    // Clicco su una canzone
-                     setState(() => currentTrack = track);
-                     // Avvio lo streaming
-                     await _audioService.playTrack(track.searchQuery);
+                  onTap: () {
+                    // QUI PASSIAMO TUTTA LA LISTA AL MANAGER
+                    _audioManager.setQueue(selectedPlaylist!.tracks, index);
                   },
                 );
               },
             ),
           ),
-          
-          // MINI PLAYER (barra in basso se c'è musica)
-          if (currentTrack != null)
-            Container(
-              color: Colors.grey[900],
-              padding: const EdgeInsets.all(16),
-              child: SafeArea(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text("In riproduzione: ${currentTrack!.name} - ${currentTrack!.artist}", 
-                        style: const TextStyle(color: Colors.white),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.stop, color: Colors.red),
-                      onPressed: () {
-                        _audioService.stop();
-                        setState(() => currentTrack = null);
-                      },
-                    )
-                  ],
-                ),
-              ),
-            )
+          const MiniPlayer(), // Il player fisso in basso
         ],
       ),
     );
+  }
+}
+
+// --- 4. WIDGET MINI PLAYER (NUOVO E COMPLETO) ---
+class MiniPlayer extends StatelessWidget {
+  const MiniPlayer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Usiamo AnimatedBuilder per aggiornare la grafica quando cambia la canzone
+    return AnimatedBuilder(
+      animation: AudioManager(),
+      builder: (context, child) {
+        final manager = AudioManager();
+        final track = manager.currentTrack;
+
+        if (track == null) return const SizedBox.shrink(); // Nascondi se non c'è musica
+
+        return Container(
+          color: Colors.grey[900],
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // CONTROLLI E INFO
+              ListTile(
+                // Mostra thumbnail se c'è, altrimenti icona
+                leading: track.runtimeThumbnail != null 
+                  ? Image.network(track.runtimeThumbnail!, width: 50, fit: BoxFit.cover)
+                  : const Icon(Icons.music_note, size: 40, color: Colors.grey),
+                title: Text(track.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(track.artist),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(icon: const Icon(Icons.skip_previous), onPressed: manager.previous),
+                    IconButton(
+                      icon: manager.isLoading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(manager.isPlaying ? Icons.pause_circle : Icons.play_circle, size: 40, color: Colors.green),
+                      onPressed: manager.togglePlayPause,
+                    ),
+                    IconButton(icon: const Icon(Icons.skip_next), onPressed: manager.next),
+                  ],
+                ),
+              ),
+              
+              // BARRA DI PROGRESSO (Slider)
+              StreamBuilder<Duration>(
+                stream: manager.positionStream,
+                builder: (context, snapPos) {
+                  final pos = snapPos.data ?? Duration.zero;
+                  return StreamBuilder<Duration?>(
+                    stream: manager.durationStream,
+                    builder: (context, snapDur) {
+                      final duration = snapDur.data ?? Duration.zero;
+                      final maxSec = duration.inSeconds.toDouble() > 0 ? duration.inSeconds.toDouble() : 1.0;
+                      final val = pos.inSeconds.toDouble().clamp(0.0, maxSec);
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            Text(_format(pos), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Expanded(
+                              child: Slider(
+                                min: 0.0,
+                                max: maxSec,
+                                value: val,
+                                onChanged: (v) => manager.seek(Duration(seconds: v.toInt())),
+                              ),
+                            ),
+                            Text(_format(duration), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _format(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return "$m:$s";
   }
 }
