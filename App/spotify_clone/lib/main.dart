@@ -21,6 +21,10 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF121212),
         appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF121212), elevation: 0),
         bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.transparent),
+        textSelectionTheme: const TextSelectionThemeData(cursorColor: Colors.green), // Cursore verde
+        inputDecorationTheme: const InputDecorationTheme(
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.green)),
+        ),
         sliderTheme: const SliderThemeData(
           activeTrackColor: Colors.green,
           thumbColor: Colors.green,
@@ -182,6 +186,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   bool isLoading = true;
   Playlist? selectedPlaylist;
 
+  // VARIABILI PER LA RICERCA
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = "";
+
   @override
   void initState() {
     super.initState();
@@ -205,18 +214,89 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     }
   }
 
+  // LOGICA FILTRO PLAYLIST
+  List<Playlist> get filteredPlaylists {
+    if (_searchText.isEmpty) return playlists;
+    return playlists.where((pl) => pl.name.toLowerCase().contains(_searchText.toLowerCase())).toList();
+  }
+
+  // LOGICA FILTRO CANZONI
+  List<Track> get filteredTracks {
+    if (selectedPlaylist == null) return [];
+    if (_searchText.isEmpty) return selectedPlaylist!.tracks;
+    return selectedPlaylist!.tracks.where((track) {
+      return track.name.toLowerCase().contains(_searchText.toLowerCase()) ||
+             track.artist.toLowerCase().contains(_searchText.toLowerCase());
+    }).toList();
+  }
+
+  // GESTIONE ATTIVAZIONE/DISATTIVAZIONE RICERCA
+  void _startSearch() {
+    setState(() {
+      _isSearching = true;
+    });
+  }
+
+  void _stopSearch() {
+    setState(() {
+      _isSearching = false;
+      _searchText = "";
+      _searchController.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-    // VISTA HOME
+    // --- COSTRUIAMO L'APP BAR DINAMICA ---
+    AppBar buildAppBar(String title, {VoidCallback? onBack}) {
+      return AppBar(
+        leading: onBack != null 
+          ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: onBack)
+          : (_isSearching ? const Icon(Icons.search) : null), // Se cerco nella home, mostro icona, altrimenti nulla
+        title: _isSearching
+          ? TextField(
+              controller: _searchController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: "Cerca...",
+                hintStyle: TextStyle(color: Colors.white54),
+                border: InputBorder.none,
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchText = value;
+                });
+              },
+            )
+          : Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: !_isSearching,
+        actions: [
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: _stopSearch,
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: _startSearch,
+            ),
+        ],
+      );
+    }
+
+    // VISTA HOME (LISTA PLAYLIST)
     if (selectedPlaylist == null) {
+      // Nota: Quando siamo nella Home, resettiamo la ricerca se veniamo da una playlist
       return Scaffold(
-        appBar: AppBar(title: const Text("Le mie Playlist", style: TextStyle(fontWeight: FontWeight.bold))),
+        appBar: buildAppBar("Le mie Playlist"),
         body: ListView.builder(
-          itemCount: playlists.length,
+          itemCount: filteredPlaylists.length,
           itemBuilder: (context, index) {
-            final pl = playlists[index];
+            final pl = filteredPlaylists[index];
             return ListTile(
               contentPadding: const EdgeInsets.all(16),
               leading: Container(
@@ -226,7 +306,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               ),
               title: Text(pl.name, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text("${pl.tracks.length} brani"),
-              onTap: () => setState(() => selectedPlaylist = pl),
+              onTap: () {
+                _stopSearch(); // Resetta la ricerca prima di entrare
+                setState(() => selectedPlaylist = pl);
+              },
             );
           },
         ),
@@ -234,43 +317,55 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       );
     }
 
-    // VISTA PLAYLIST
+    // VISTA PLAYLIST (BRANI)
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => selectedPlaylist = null)),
-        title: Text(selectedPlaylist!.name),
-        centerTitle: true,
+      appBar: buildAppBar(
+        selectedPlaylist!.name, 
+        onBack: () {
+          _stopSearch(); // Resetta la ricerca quando torni indietro
+          setState(() => selectedPlaylist = null);
+        }
       ),
       body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: const Icon(Icons.music_note, size: 60, color: Colors.green),
-          ),
+          // Mostra l'icona grande solo se NON stiamo cercando, per risparmiare spazio
+          if (!_isSearching)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: const Icon(Icons.music_note, size: 60, color: Colors.green),
+            ),
           
           Expanded(
-            child: ListView.builder(
-              itemCount: selectedPlaylist!.tracks.length,
-              itemBuilder: (context, index) {
-                final track = selectedPlaylist!.tracks[index];
-                final isCurrent = _audioManager.currentTrack == track;
-                
-                return ListTile(
-                  leading: Text("${index + 1}", style: const TextStyle(color: Colors.grey, fontSize: 16)),
-                  title: Text(track.name, 
-                    style: TextStyle(
-                      color: isCurrent ? Colors.green : Colors.white, 
-                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal
-                    )
-                  ),
-                  subtitle: Text(track.artist),
-                  trailing: isCurrent && _audioManager.isPlaying 
-                    ? const Icon(Icons.volume_up, color: Colors.green, size: 20) 
-                    : null,
-                  onTap: () => _audioManager.setQueue(selectedPlaylist!.tracks, index),
-                );
-              },
-            ),
+            child: filteredTracks.isEmpty 
+              ? const Center(child: Text("Nessun risultato", style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  itemCount: filteredTracks.length,
+                  itemBuilder: (context, index) {
+                    final track = filteredTracks[index];
+                    final isCurrent = _audioManager.currentTrack == track;
+                    
+                    return ListTile(
+                      leading: Text("${index + 1}", style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                      title: Text(track.name, 
+                        style: TextStyle(
+                          color: isCurrent ? Colors.green : Colors.white, 
+                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal
+                        )
+                      ),
+                      subtitle: Text(track.artist),
+                      trailing: isCurrent && _audioManager.isPlaying 
+                        ? const Icon(Icons.volume_up, color: Colors.green, size: 20) 
+                        : null,
+                      onTap: () {
+                        // Se stiamo cercando, la lista è filtrata.
+                        // Passiamo al player SOLO la lista filtrata, così "Next" va al prossimo risultato della ricerca
+                        _audioManager.setQueue(filteredTracks, index);
+                        // Opzionale: Se vuoi chiudere la tastiera dopo il click:
+                        FocusScope.of(context).unfocus();
+                      },
+                    );
+                  },
+                ),
           ),
           const MiniPlayer(),
         ],
@@ -279,7 +374,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   }
 }
 
-// --- 4. MINI PLAYER (FIX RESPONSIVE: BARRA FULL WIDTH) ---
+// --- 4. MINI PLAYER (Con Timeline Full Width) ---
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
@@ -381,7 +476,7 @@ class MiniPlayer extends StatelessWidget {
   }
 }
 
-// --- 5. SCHERMATA GRANDE (ALTEZZA 92% + FIX FORMAT) ---
+// --- 5. SCHERMATA GRANDE ---
 class FullScreenPlayer extends StatelessWidget {
   const FullScreenPlayer({super.key});
 
@@ -402,7 +497,6 @@ class FullScreenPlayer extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: 10),
-          // MANIGLIA
           Container(
             width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey[700], borderRadius: BorderRadius.circular(2)),
@@ -417,7 +511,6 @@ class FullScreenPlayer extends StatelessWidget {
 
                 return Column(
                   children: [
-                    // Top Bar
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Row(
@@ -435,7 +528,6 @@ class FullScreenPlayer extends StatelessWidget {
 
                     const Spacer(),
 
-                    // COPERTINA GRANDE
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 30),
                       decoration: BoxDecoration(
@@ -451,7 +543,6 @@ class FullScreenPlayer extends StatelessWidget {
 
                     const SizedBox(height: 40),
 
-                    // TITOLO E ARTISTA
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 30),
                       child: Align(
@@ -468,7 +559,6 @@ class FullScreenPlayer extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // SLIDER E TEMPI
                     StreamBuilder<Duration>(
                       stream: manager.positionStream,
                       builder: (context, snapPos) {
@@ -505,7 +595,6 @@ class FullScreenPlayer extends StatelessWidget {
 
                     const SizedBox(height: 10),
 
-                    // CONTROLLI PLAYBACK
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -535,7 +624,6 @@ class FullScreenPlayer extends StatelessWidget {
     );
   }
 
-  // ECCO LA FUNZIONE CHE MANCAVA
   String _format(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
