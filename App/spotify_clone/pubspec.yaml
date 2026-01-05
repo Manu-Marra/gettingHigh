@@ -38,7 +38,11 @@ dependencies:
   path_provider: ^2.1.2
   webview_flutter: ^4.4.2
   http: ^1.1.0
-
+  # Aggiungi questa riga (controlla su pub.dev per l'ultima versione, ma questa va bene)
+  url_launcher: ^6.2.0
+  file_picker: ^8.0.0
+  archive: ^3.3.7         # Per unzippare (al posto di zipfile python)
+  csv: ^5.0.2             # Per leggere i csv (al posto di csv python)
 
 dev_dependencies:
   flutter_test:
