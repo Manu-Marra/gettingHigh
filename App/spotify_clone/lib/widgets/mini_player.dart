@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:marquee/marquee.dart'; // <--- Importante
 import 'package:just_audio/just_audio.dart';
 import '../services/audio_manager.dart';
 import 'full_screen_player.dart';
@@ -37,6 +38,7 @@ class MiniPlayer extends StatelessWidget {
                       padding: const EdgeInsets.all(8.0),
                       child: Row(
                         children: [
+                          // Immagine piccola
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: track.runtimeThumbnail != null 
@@ -44,15 +46,48 @@ class MiniPlayer extends StatelessWidget {
                               : Container(color: Colors.grey[800], width: 45, height: 45, child: const Icon(Icons.music_note)),
                           ),
                           const SizedBox(width: 12),
+                          
+                          // Testi (Titolo Scorrevole + Artista)
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(track.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
-                                Text(track.artist, style: const TextStyle(fontSize: 11, color: Colors.grey), overflow: TextOverflow.ellipsis),
+                                // --- MODIFICA QUI ---
+                                // Sostituito il Text statico con Marquee dentro SizedBox
+                                SizedBox(
+                                  height: 20, // Altezza sufficiente per font size 13
+                                  child: Marquee(
+                                    text: track.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold, 
+                                      fontSize: 13,
+                                      color: Colors.white // Assicuriamoci che sia bianco
+                                    ),
+                                    scrollAxis: Axis.horizontal,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    blankSpace: 30.0,
+                                    velocity: 30.0,
+                                    pauseAfterRound: const Duration(seconds: 3),
+                                    startPadding: 0.0,
+                                    accelerationDuration: const Duration(seconds: 1),
+                                    accelerationCurve: Curves.linear,
+                                    decelerationDuration: const Duration(milliseconds: 500),
+                                    decelerationCurve: Curves.easeOut,
+                                  ),
+                                ),
+                                
+                                // Artista (rimane statico con puntini)
+                                Text(
+                                  track.artist, 
+                                  style: const TextStyle(fontSize: 11, color: Colors.grey), 
+                                  maxLines: 1, // Limitiamo a una riga
+                                  overflow: TextOverflow.ellipsis
+                                ),
                               ],
                             ),
                           ),
+                          
+                          // Controlli
                           IconButton(icon: const Icon(Icons.skip_previous), onPressed: manager.previous),
                           IconButton(
                             icon: manager.isLoading 
@@ -64,6 +99,8 @@ class MiniPlayer extends StatelessWidget {
                         ],
                       ),
                     ),
+                    
+                    // Barra progresso sottile
                     StreamBuilder<Duration>(
                       stream: manager.positionStream,
                       builder: (context, snap) {
