@@ -4,7 +4,7 @@ import '../services/audio_manager.dart';
 import '../widgets/mini_player.dart';
 
 class PlaylistScreen extends StatefulWidget {
-  final Playlist playlist; // Riceve la playlist dalla Home
+  final Playlist playlist;
 
   const PlaylistScreen({super.key, required this.playlist});
 
@@ -22,23 +22,36 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   @override
   void initState() {
     super.initState();
-    // Aggiungiamo il listener per aggiornare la UI se cambia la canzone
-    _audioManager.addListener(() {
-      if (mounted) setState(() {});
-    });
+    _audioManager.addListener(_update);
   }
 
-  // Filtra i brani della playlist corrente in base alla ricerca
+  @override
+  void dispose() {
+    _audioManager.removeListener(_update);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _update() {
+    if (mounted) setState(() {});
+  }
+
+  // Logica di filtraggio
   List<Track> get filteredTracks {
     if (_searchText.isEmpty) return widget.playlist.tracks;
     
     return widget.playlist.tracks.where((track) {
-      return track.name.toLowerCase().contains(_searchText.toLowerCase()) ||
-             track.artist.toLowerCase().contains(_searchText.toLowerCase());
+      final query = _searchText.toLowerCase();
+      return track.name.toLowerCase().contains(query) ||
+             track.artist.toLowerCase().contains(query);
     }).toList();
   }
 
-  void _startSearch() => setState(() => _isSearching = true);
+  void _startSearch() {
+    setState(() {
+      _isSearching = true;
+    });
+  }
   
   void _stopSearch() {
     setState(() {
@@ -50,54 +63,46 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Calcoliamo la lista filtrata una volta per build
+    final currentTracks = filteredTracks;
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _isSearching ? const Color(0xFF121212) : Colors.transparent,
         elevation: 0,
-        leading: Container(
-          margin: const EdgeInsets.all(8),
-          decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-          child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            // Torna alla Home
-            onPressed: () => Navigator.pop(context), 
-          ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context), 
         ),
         title: _isSearching
-            ? Container(
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(20),
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                cursorColor: Colors.green, // Colore cursore Spotify
+                decoration: const InputDecoration(
+                  hintText: "Cerca brano...",
+                  hintStyle: TextStyle(color: Colors.white54),
+                  border: InputBorder.none,
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
-                  controller: _searchController,
-                  autofocus: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    hintText: "Cerca brano...",
-                    hintStyle: TextStyle(color: Colors.white54),
-                    border: InputBorder.none,
-                  ),
-                  onChanged: (value) => setState(() => _searchText = value),
-                ),
+                onChanged: (value) {
+                  setState(() {
+                    _searchText = value;
+                  });
+                },
               )
-            : null,
+            : null, // Nessun titolo se non si cerca (l'immagine fa da titolo)
         actions: [
-          Container(
-            margin: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-            child: IconButton(
-              icon: Icon(_isSearching ? Icons.close : Icons.search, color: Colors.white),
-              onPressed: _isSearching ? _stopSearch : _startSearch,
-            ),
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search, color: Colors.white),
+            onPressed: _isSearching ? _stopSearch : _startSearch,
           )
         ],
       ),
       body: Column(
         children: [
-          // Header con gradiente e immagine (Mostrato solo se non si sta cercando)
+          // Header Gradiente (Nascosto se cerchiamo per dare spazio ai risultati)
           if (!_isSearching)
             Container(
               height: 300,
@@ -106,33 +111,26 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.green.withOpacity(0.8),
-                    const Color(0xFF121212)
-                  ],
+                  colors: [Colors.green.withOpacity(0.8), const Color(0xFF121212)],
                 ),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SizedBox(height: 60), // Spazio per l'AppBar
+                  const SizedBox(height: 60),
                   Container(
                     decoration: const BoxDecoration(
-                      boxShadow: [
-                        BoxShadow(color: Colors.black45, blurRadius: 20, offset: Offset(0, 10))
-                      ],
+                      boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 20, offset: Offset(0, 10))],
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: widget.playlist.imageUrl != null && widget.playlist.imageUrl!.isNotEmpty
                           ? Image.network(
                               widget.playlist.imageUrl!,
-                              width: 160,
-                              height: 160,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _buildPlaceholderImage(),
+                              width: 160, height: 160, fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _buildPlaceholder(),
                             )
-                          : _buildPlaceholderImage(),
+                          : _buildPlaceholder(),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -141,10 +139,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     child: Text(
                       widget.playlist.name,
                       textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white,
                         shadows: [Shadow(color: Colors.black, blurRadius: 10)],
                       ),
                     ),
@@ -153,35 +151,32 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               ),
             ),
 
-          // Spazio compensativo per l'AppBar quando si cerca (per non coprire la lista)
-          if (_isSearching) const SizedBox(height: 100),
+          // Spazio per AppBar quando si cerca
+          if (_isSearching) const SizedBox(height: kToolbarHeight + 30),
 
-          // Lista dei brani
+          // LISTA CANZONI
           Expanded(
             child: Container(
               color: const Color(0xFF121212),
-              child: filteredTracks.isEmpty
+              child: currentTracks.isEmpty
                   ? Center(
                       child: Text(
-                        _isSearching ? "Nessun risultato" : "Questa playlist è vuota",
+                        _searchText.isNotEmpty ? "Nessun risultato" : "Playlist vuota",
                         style: const TextStyle(color: Colors.grey),
                       ),
                     )
                   : ListView.builder(
                       padding: EdgeInsets.zero,
-                      itemCount: filteredTracks.length,
+                      itemCount: currentTracks.length,
                       itemBuilder: (context, index) {
-                        final track = filteredTracks[index];
-                        final isCurrent = _audioManager.currentTrack?.name == track.name; // Confronto per nome o oggetto
+                        final track = currentTracks[index];
+                        final isCurrent = _audioManager.currentTrack?.name == track.name;
 
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                           leading: Text(
                             "${index + 1}",
-                            style: TextStyle(
-                              color: isCurrent ? Colors.green : Colors.grey,
-                              fontSize: 16,
-                            ),
+                            style: TextStyle(color: isCurrent ? Colors.green : Colors.grey, fontSize: 16),
                           ),
                           title: Text(
                             track.name,
@@ -196,34 +191,32 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                             track.artist,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.grey[400]),
+                            style: TextStyle(color: Colors.grey[400], fontSize: 13),
                           ),
                           trailing: isCurrent && _audioManager.isPlaying
                               ? const Icon(Icons.volume_up, color: Colors.green, size: 20)
                               : null,
                           onTap: () {
-                            // Imposta la coda usando la lista filtrata
-                            _audioManager.setQueue(filteredTracks, index);
-                            FocusScope.of(context).unfocus(); // Chiude la tastiera se aperta
+                            // IMPORTANTE: Passiamo la lista FILTRATA come coda
+                            // Se cerco "Amore", la coda sarà solo le canzoni con "Amore"
+                            _audioManager.setQueue(currentTracks, index);
+                            FocusScope.of(context).unfocus(); // Chiude tastiera
                           },
                         );
                       },
                     ),
             ),
           ),
-          
-          // Player ridotto in basso
           const MiniPlayer(),
         ],
       ),
     );
   }
 
-  Widget _buildPlaceholderImage() {
+  Widget _buildPlaceholder() {
     return Container(
       color: Colors.grey[800],
-      width: 160,
-      height: 160,
+      width: 160, height: 160,
       child: const Icon(Icons.music_note, size: 80, color: Colors.white54),
     );
   }
