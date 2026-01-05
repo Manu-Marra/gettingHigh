@@ -15,6 +15,9 @@ class PlaylistScreen extends StatefulWidget {
 class _PlaylistScreenState extends State<PlaylistScreen> {
   final AudioManager _audioManager = AudioManager();
   
+  // Controller Scrollbar
+  final ScrollController _scrollController = ScrollController();
+  
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchText = "";
@@ -28,6 +31,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   @override
   void dispose() {
     _audioManager.removeListener(_update);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -36,7 +40,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (mounted) setState(() {});
   }
 
-  // Logica di filtraggio
   List<Track> get filteredTracks {
     if (_searchText.isEmpty) return widget.playlist.tracks;
     
@@ -63,7 +66,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Calcoliamo la lista filtrata una volta per build
     final currentTracks = filteredTracks;
 
     return Scaffold(
@@ -80,7 +82,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 controller: _searchController,
                 autofocus: true,
                 style: const TextStyle(color: Colors.white),
-                cursorColor: Colors.green, // Colore cursore Spotify
+                cursorColor: Colors.green,
                 decoration: const InputDecoration(
                   hintText: "Cerca brano...",
                   hintStyle: TextStyle(color: Colors.white54),
@@ -92,7 +94,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                   });
                 },
               )
-            : null, // Nessun titolo se non si cerca (l'immagine fa da titolo)
+            : null,
         actions: [
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search, color: Colors.white),
@@ -102,7 +104,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       ),
       body: Column(
         children: [
-          // Header Gradiente (Nascosto se cerchiamo per dare spazio ai risultati)
           if (!_isSearching)
             Container(
               height: 300,
@@ -151,7 +152,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               ),
             ),
 
-          // Spazio per AppBar quando si cerca
           if (_isSearching) const SizedBox(height: kToolbarHeight + 30),
 
           // LISTA CANZONI
@@ -165,45 +165,52 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                         style: const TextStyle(color: Colors.grey),
                       ),
                     )
-                  : ListView.builder(
-                      padding: EdgeInsets.zero,
-                      itemCount: currentTracks.length,
-                      itemBuilder: (context, index) {
-                        final track = currentTracks[index];
-                        final isCurrent = _audioManager.currentTrack?.name == track.name;
+                  // SCROLLBAR INTERATTIVA
+                  : Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      interactive: true, // <--- RENDE POSSIBILE IL DRAG
+                      thickness: 8.0,    // Spessore aumentato
+                      radius: const Radius.circular(10),
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: EdgeInsets.zero,
+                        itemCount: currentTracks.length,
+                        itemBuilder: (context, index) {
+                          final track = currentTracks[index];
+                          final isCurrent = _audioManager.currentTrack?.name == track.name;
 
-                        return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                          leading: Text(
-                            "${index + 1}",
-                            style: TextStyle(color: isCurrent ? Colors.green : Colors.grey, fontSize: 16),
-                          ),
-                          title: Text(
-                            track.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isCurrent ? Colors.green : Colors.white,
-                              fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                            leading: Text(
+                              "${index + 1}",
+                              style: TextStyle(color: isCurrent ? Colors.green : Colors.grey, fontSize: 16),
                             ),
-                          ),
-                          subtitle: Text(
-                            track.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.grey[400], fontSize: 13),
-                          ),
-                          trailing: isCurrent && _audioManager.isPlaying
-                              ? const Icon(Icons.volume_up, color: Colors.green, size: 20)
-                              : null,
-                          onTap: () {
-                            // IMPORTANTE: Passiamo la lista FILTRATA come coda
-                            // Se cerco "Amore", la coda sarà solo le canzoni con "Amore"
-                            _audioManager.setQueue(currentTracks, index);
-                            FocusScope.of(context).unfocus(); // Chiude tastiera
-                          },
-                        );
-                      },
+                            title: Text(
+                              track.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isCurrent ? Colors.green : Colors.white,
+                                fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                            ),
+                            trailing: isCurrent && _audioManager.isPlaying
+                                ? const Icon(Icons.volume_up, color: Colors.green, size: 20)
+                                : null,
+                            onTap: () {
+                              _audioManager.setQueue(currentTracks, index);
+                              FocusScope.of(context).unfocus();
+                            },
+                          );
+                        },
+                      ),
                     ),
             ),
           ),

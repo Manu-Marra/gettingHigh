@@ -3,7 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/data_models.dart';
 import '../services/music_service.dart';
 import '../services/playlist_import_service.dart';
-import '../widgets/mini_player.dart'; // <--- Importante per il player
+import '../widgets/mini_player.dart';
 import 'playlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,6 +16,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late Future<List<Playlist>> _playlistsFuture;
   final MusicService _musicService = MusicService();
+  
+  // Controller per la Scrollbar
+  final ScrollController _scrollController = ScrollController();
 
   // --- LOGICA RICERCA ---
   bool _isSearching = false;
@@ -28,13 +31,19 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadPlaylists();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _loadPlaylists() {
     setState(() {
       _playlistsFuture = _musicService.getPlaylists();
     });
   }
 
-  // Gestione apertura/chiusura ricerca
   void _startSearch() {
     setState(() {
       _isSearching = true;
@@ -63,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleImportZip() async {
-    Navigator.of(context).pop(); // Chiude il dialog
+    Navigator.of(context).pop(); 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Seleziona il file .zip scaricato...')),
     );
@@ -141,10 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      // --- MODIFICA QUI: Usiamo una Column per mettere lista e player ---
       body: Column(
         children: [
-          // Expanded occupa tutto lo spazio rimanente per la lista
           Expanded(
             child: FutureBuilder<List<Playlist>>(
               future: _playlistsFuture,
@@ -167,42 +174,50 @@ class _HomeScreenState extends State<HomeScreen> {
                   return const Center(child: Text("Nessuna playlist trovata con questo nome.", style: TextStyle(color: Colors.grey)));
                 }
 
-                return ListView.builder(
-                  itemCount: displayedPlaylists.length,
-                  itemBuilder: (context, index) {
-                    final playlist = displayedPlaylists[index];
-                    
-                    Widget imageWidget;
-                    if (playlist.imageUrl != null && playlist.imageUrl!.isNotEmpty) {
-                      imageWidget = Image.network(playlist.imageUrl!, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.grey[800], child: const Icon(Icons.music_note)));
-                    } else {
-                      imageWidget = Container(color: Colors.grey[800], child: const Icon(Icons.music_note, color: Colors.white54));
-                    }
+                // SCROLLBAR INTERATTIVA
+                return Scrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true, 
+                  interactive: true, // <--- QUESTA È LA CHIAVE PER IL TRASCINAMENTO
+                  thickness: 8.0,    // Un po' più spessa per prenderla meglio
+                  radius: const Radius.circular(10),
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    itemCount: displayedPlaylists.length,
+                    itemBuilder: (context, index) {
+                      final playlist = displayedPlaylists[index];
+                      
+                      Widget imageWidget;
+                      if (playlist.imageUrl != null && playlist.imageUrl!.isNotEmpty) {
+                        imageWidget = Image.network(playlist.imageUrl!, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.grey[800], child: const Icon(Icons.music_note)));
+                      } else {
+                        imageWidget = Container(color: Colors.grey[800], child: const Icon(Icons.music_note, color: Colors.white54));
+                      }
 
-                    return ListTile(
-                      leading: SizedBox(
-                        width: 50, height: 50,
-                        child: ClipRRect(borderRadius: BorderRadius.circular(4), child: imageWidget),
-                      ),
-                      title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
-                      subtitle: Text("${playlist.tracks.length} brani", style: TextStyle(color: Colors.grey[400])),
-                      onTap: () {
-                        _stopSearch(); 
-                        Navigator.push(
-                           context,
-                           MaterialPageRoute(
-                             builder: (context) => PlaylistScreen(playlist: playlist),
-                           ),
-                         );
-                      },
-                    );
-                  },
+                      return ListTile(
+                        leading: SizedBox(
+                          width: 50, height: 50,
+                          child: ClipRRect(borderRadius: BorderRadius.circular(4), child: imageWidget),
+                        ),
+                        title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
+                        subtitle: Text("${playlist.tracks.length} brani", style: TextStyle(color: Colors.grey[400])),
+                        onTap: () {
+                          _stopSearch(); 
+                          Navigator.push(
+                             context,
+                             MaterialPageRoute(
+                               builder: (context) => PlaylistScreen(playlist: playlist),
+                             ),
+                           );
+                        },
+                      );
+                    },
+                  ),
                 );
               },
             ),
           ),
           
-          // --- MINI PLAYER SEMPRE VISIBILE IN FONDO ---
           const MiniPlayer(),
         ],
       ),
