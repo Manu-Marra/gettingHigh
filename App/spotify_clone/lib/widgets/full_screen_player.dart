@@ -1,4 +1,4 @@
-
+import 'package:marquee/marquee.dart';
 import 'package:flutter/material.dart';
 import '../services/audio_manager.dart';
 import '../models/data_models.dart';
@@ -74,8 +74,34 @@ class FullScreenPlayer extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(track.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                            Text(track.artist, style: const TextStyle(fontSize: 18, color: Colors.grey)),
+                            // --- CORREZIONE QUI ---
+                            // Ho rimosso "Text(...)" e lasciato solo SizedBox > Marquee
+                            SizedBox(
+                              height: 35, // Altezza fissa per il titolo
+                              child: Marquee(
+                                text: track.name,
+                                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                                scrollAxis: Axis.horizontal,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                blankSpace: 50.0,
+                                velocity: 30.0,
+                                pauseAfterRound: const Duration(seconds: 3),
+                                startPadding: 0.0,
+                                accelerationDuration: const Duration(seconds: 1),
+                                accelerationCurve: Curves.linear,
+                                decelerationDuration: const Duration(milliseconds: 500),
+                                decelerationCurve: Curves.easeOut,
+                              ),
+                            ),
+                            
+                            const SizedBox(height: 4),
+
+                            Text(
+                              track.artist, 
+                              style: const TextStyle(fontSize: 18, color: Colors.grey),
+                              maxLines: 1, // Assicuriamo che l'artista non rompa il layout
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ],
                         ),
                       ),

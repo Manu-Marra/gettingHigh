@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/data_models.dart';
 import '../services/music_service.dart';
 import '../services/playlist_import_service.dart';
+import '../widgets/mini_player.dart'; // <--- Importante per il player
 import 'playlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -62,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleImportZip() async {
-    Navigator.of(context).pop(); 
+    Navigator.of(context).pop(); // Chiude il dialog
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Seleziona il file .zip scaricato...')),
     );
@@ -104,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // Se stiamo cercando mostra il campo di testo, altrimenti il titolo
         title: _isSearching
             ? TextField(
                 controller: _searchController,
@@ -123,7 +123,6 @@ class _HomeScreenState extends State<HomeScreen> {
               )
             : const Text("Le mie Playlist"),
         actions: [
-          // Tasto Cerca (o Chiudi Cerca)
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search),
             onPressed: () {
@@ -134,7 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
           ),
-          // Tasto Importa (visibile solo se non cerchi)
           if (!_isSearching)
             IconButton(
               icon: const Icon(Icons.download),
@@ -143,61 +141,70 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      body: FutureBuilder<List<Playlist>>(
-        future: _playlistsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text("Errore: ${snapshot.error}"));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text("Nessuna playlist. Importane una!", style: TextStyle(color: Colors.grey)));
-          }
+      // --- MODIFICA QUI: Usiamo una Column per mettere lista e player ---
+      body: Column(
+        children: [
+          // Expanded occupa tutto lo spazio rimanente per la lista
+          Expanded(
+            child: FutureBuilder<List<Playlist>>(
+              future: _playlistsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                } else if (snapshot.hasError) {
+                  return Center(child: Text("Errore: ${snapshot.error}"));
+                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text("Nessuna playlist. Importane una!", style: TextStyle(color: Colors.grey)));
+                }
 
-          final allPlaylists = snapshot.data!;
+                final allPlaylists = snapshot.data!;
+                
+                final displayedPlaylists = _searchText.isEmpty
+                    ? allPlaylists
+                    : allPlaylists.where((p) => p.name.toLowerCase().contains(_searchText.toLowerCase())).toList();
+
+                if (displayedPlaylists.isEmpty) {
+                  return const Center(child: Text("Nessuna playlist trovata con questo nome.", style: TextStyle(color: Colors.grey)));
+                }
+
+                return ListView.builder(
+                  itemCount: displayedPlaylists.length,
+                  itemBuilder: (context, index) {
+                    final playlist = displayedPlaylists[index];
+                    
+                    Widget imageWidget;
+                    if (playlist.imageUrl != null && playlist.imageUrl!.isNotEmpty) {
+                      imageWidget = Image.network(playlist.imageUrl!, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.grey[800], child: const Icon(Icons.music_note)));
+                    } else {
+                      imageWidget = Container(color: Colors.grey[800], child: const Icon(Icons.music_note, color: Colors.white54));
+                    }
+
+                    return ListTile(
+                      leading: SizedBox(
+                        width: 50, height: 50,
+                        child: ClipRRect(borderRadius: BorderRadius.circular(4), child: imageWidget),
+                      ),
+                      title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
+                      subtitle: Text("${playlist.tracks.length} brani", style: TextStyle(color: Colors.grey[400])),
+                      onTap: () {
+                        _stopSearch(); 
+                        Navigator.push(
+                           context,
+                           MaterialPageRoute(
+                             builder: (context) => PlaylistScreen(playlist: playlist),
+                           ),
+                         );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
           
-          // FILTRO LISTA: Se c'è testo di ricerca, filtriamo qui
-          final displayedPlaylists = _searchText.isEmpty
-              ? allPlaylists
-              : allPlaylists.where((p) => p.name.toLowerCase().contains(_searchText.toLowerCase())).toList();
-
-          if (displayedPlaylists.isEmpty) {
-            return const Center(child: Text("Nessuna playlist trovata con questo nome.", style: TextStyle(color: Colors.grey)));
-          }
-
-          return ListView.builder(
-            itemCount: displayedPlaylists.length,
-            itemBuilder: (context, index) {
-              final playlist = displayedPlaylists[index];
-              
-              Widget imageWidget;
-              if (playlist.imageUrl != null && playlist.imageUrl!.isNotEmpty) {
-                imageWidget = Image.network(playlist.imageUrl!, fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.grey[800], child: const Icon(Icons.music_note)));
-              } else {
-                imageWidget = Container(color: Colors.grey[800], child: const Icon(Icons.music_note, color: Colors.white54));
-              }
-
-              return ListTile(
-                leading: SizedBox(
-                  width: 50, height: 50,
-                  child: ClipRRect(borderRadius: BorderRadius.circular(4), child: imageWidget),
-                ),
-                title: Text(playlist.name, style: const TextStyle(color: Colors.white)),
-                subtitle: Text("${playlist.tracks.length} brani", style: TextStyle(color: Colors.grey[400])),
-                onTap: () {
-                  // Quando clicco, fermo la ricerca nella home e vado al dettaglio
-                  _stopSearch(); 
-                  Navigator.push(
-                     context,
-                     MaterialPageRoute(
-                       builder: (context) => PlaylistScreen(playlist: playlist),
-                     ),
-                   );
-                },
-              );
-            },
-          );
-        },
+          // --- MINI PLAYER SEMPRE VISIBILE IN FONDO ---
+          const MiniPlayer(),
+        ],
       ),
     );
   }

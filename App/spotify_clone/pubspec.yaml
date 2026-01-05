@@ -43,6 +43,7 @@ dependencies:
   file_picker: ^8.0.0
   archive: ^3.3.7         # Per unzippare (al posto di zipfile python)
   csv: ^5.0.2             # Per leggere i csv (al posto di csv python)
+  marquee: ^2.2.0
 
 dev_dependencies:
   flutter_test:
